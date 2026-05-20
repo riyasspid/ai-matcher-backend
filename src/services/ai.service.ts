@@ -15,7 +15,13 @@ export class AIService implements OnModuleInit {
     this.logger.log('Initializing AI Service with Xenova/clip-vit-base-patch32...');
     try {
       // Dynamic import to handle ES module inside CommonJS NestJS setup
-      const { pipeline } = await (eval('import("@xenova/transformers")') as Promise<any>);
+      const { pipeline, env } = await (eval('import("@xenova/transformers")') as Promise<any>);
+      
+      // Configure cache directory to use writable OS temp directory (prevents EROFS on Vercel/serverless)
+      const tempCacheDir = path.join(os.tmpdir(), '.transformers_cache');
+      env.cacheDir = tempCacheDir;
+      env.allowLocalModels = false;
+      this.logger.log(`Configured transformers cache directory to: ${tempCacheDir}`);
       
       // Use Xenova's compiled clip-vit-base-patch32 model for image feature extraction
       this.extractor = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');

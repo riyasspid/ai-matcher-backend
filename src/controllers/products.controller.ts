@@ -277,16 +277,26 @@ export class ProductsController {
       const imageId = imageResult.rows[0].id;
 
       // 3. Generate CLIP unit-normalized embedding
-      const embedding = await this.aiService.generateEmbedding(file.buffer);
+      let embedding: number[] | null = null;
+      try {
+        embedding = await this.aiService.generateEmbedding(file.buffer);
+      } catch (err) {
+        console.warn(`[Image Upload Resiliency] Embedding generation failed for image ID ${imageId}: ${err.message}. Skipping embedding creation.`);
+      }
 
-      // 4. Save embedding to pgvector image_embeddings table
-      // Format array as postgres vector string: '[v1, v2, ...]'
-      const pgVectorStr = `[${embedding.join(',')}]`;
-      await this.db.query(
-        `INSERT INTO image_embeddings (product_image_id, embedding)
-         VALUES ($1, $2)`,
-        [imageId, pgVectorStr],
-      );
+      // 4. Save embedding to pgvector image_embeddings table if generated successfully
+      if (embedding) {
+        try {
+          const pgVectorStr = `[${embedding.join(',')}]`;
+          await this.db.query(
+            `INSERT INTO image_embeddings (product_image_id, embedding)
+             VALUES ($1, $2)`,
+            [imageId, pgVectorStr],
+          );
+        } catch (dbErr) {
+          console.error(`[Image Upload Resiliency] Failed to save image embedding in database: ${dbErr.message}`);
+        }
+      }
 
       // 5. Update featured_image_url on the product table if this is the primary image
       if (is_primary) {

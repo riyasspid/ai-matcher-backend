@@ -49,6 +49,21 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Could not add avatar_url column to users table: ${e.message}`);
     }
 
+    // Ensure scan_history has processing_time and device_platform columns (prevents crash on Vercel db updates)
+    try {
+      await this.query('ALTER TABLE scan_history ADD COLUMN IF NOT EXISTS processing_time INTEGER');
+      await this.query('ALTER TABLE scan_history ADD COLUMN IF NOT EXISTS device_platform TEXT');
+    } catch (e) {
+      this.logger.warn(`Could not add columns to scan_history table: ${e.message}`);
+    }
+
+    // Ensure scan_matches has rank column (prevents crash on history match saving)
+    try {
+      await this.query('ALTER TABLE scan_matches ADD COLUMN IF NOT EXISTS rank INTEGER');
+    } catch (e) {
+      this.logger.warn(`Could not add rank column to scan_matches table: ${e.message}`);
+    }
+
     // 1. Seed categories
     try {
       const check = await this.query('SELECT COUNT(*) FROM categories');

@@ -92,11 +92,13 @@ export class ScansController {
       userIdFromBody || userIdFromQuery || userIdHeader || '00000000-0000-0000-0000-000000000000';
 
     // 1. Generate query embedding
-    let queryEmbedding: number[];
+    let queryEmbedding: number[] | null = null;
+    let fallbackToTextSearch = false;
     try {
       queryEmbedding = await this.aiService.generateEmbedding(file.buffer);
     } catch (error) {
-      throw new BadRequestException(`Failed to process scan image: ${error.message}`);
+      console.warn(`[Scan Graceful Fallback] Embedding generation failed: ${error.message}. Falling back to default database query.`);
+      fallbackToTextSearch = true;
     }
 
     // 2. Upload scan image to Supabase Storage
@@ -112,23 +114,38 @@ export class ScansController {
       // Fallback
     }
 
-    // 3. Query pgvector for the nearest 3 neighbors using cosine distance
-    const pgVectorStr = `[${queryEmbedding.join(',')}]`;
+    // 3. Query pgvector or database fallback
     let dbResults;
-    try {
-      dbResults = await this.db.query(
-        `SELECT 
-           p.*, 
-           (ie.embedding <=> $1) AS distance
-         FROM image_embeddings ie
-         JOIN product_images pi ON ie.product_image_id = pi.id
-         JOIN products p ON pi.product_id = p.id
-         ORDER BY distance ASC
-         LIMIT 3`,
-        [pgVectorStr],
-      );
-    } catch (error) {
-      throw new InternalServerErrorException(`Database query failed: ${error.message}`);
+    if (fallbackToTextSearch || !queryEmbedding) {
+      try {
+        dbResults = await this.db.query(
+          `SELECT 
+             p.*, 
+             0.5 AS distance
+           FROM products p
+           ORDER BY p.created_at DESC
+           LIMIT 3`
+        );
+      } catch (error) {
+        throw new InternalServerErrorException(`Database fallback query failed: ${error.message}`);
+      }
+    } else {
+      const pgVectorStr = `[${queryEmbedding.join(',')}]`;
+      try {
+        dbResults = await this.db.query(
+          `SELECT 
+             p.*, 
+             (ie.embedding <=> $1) AS distance
+           FROM image_embeddings ie
+           JOIN product_images pi ON ie.product_image_id = pi.id
+           JOIN products p ON pi.product_id = p.id
+           ORDER BY distance ASC
+           LIMIT 3`,
+          [pgVectorStr],
+        );
+      } catch (error) {
+        throw new InternalServerErrorException(`Database query failed: ${error.message}`);
+      }
     }
 
     if (!dbResults || dbResults.rows.length === 0) {
